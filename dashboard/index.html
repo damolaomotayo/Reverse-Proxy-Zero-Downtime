@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live traffic</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --err:#ef4444; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px 16px; background:var(--bg); color:var(--text); font-family:system-ui,sans-serif; }
+  main { max-width:760px; margin:0 auto; }
+  h1 { margin:0 0 4px; font-size:22px; }
+  p.sub { margin:0 0 20px; color:var(--muted); font-size:14px; }
+  .card { background:var(--card); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .big { font-size:44px; font-weight:700; line-height:1.1; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; align-items:baseline; }
+  .stat { color:var(--muted); font-size:14px; }
+  #grid { display:grid; grid-template-columns:repeat(30, 1fr); gap:3px; }
+  #grid div { aspect-ratio:1; border-radius:3px; background:#334155; }
+  #bar { display:flex; height:28px; border-radius:6px; overflow:hidden; background:#334155; }
+  #bar div { transition:width .2s; }
+  #legend { margin-top:10px; display:flex; flex-wrap:wrap; gap:14px; font-size:14px; }
+  #legend span::before { content:""; display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:6px; background:var(--c); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Live traffic</h1>
+  <p class="sub">This page calls the site about 10 times a second. Each square is one request, coloured by the version that answered it. Red means it failed.</p>
+
+  <div class="card">
+    <div class="stat">Most requests are answered by</div>
+    <div class="big" id="top">...</div>
+  </div>
+
+  <div class="card">
+    <div class="stat">Traffic split (last 100 requests)</div>
+    <div id="bar"></div>
+    <div id="legend"></div>
+  </div>
+
+  <div class="card">
+    <div class="stat">Last 90 requests (newest at the end)</div>
+    <div id="grid"></div>
+  </div>
+
+  <div class="card row">
+    <div><span class="stat">Total</span> <b id="total">0</b></div>
+    <div><span class="stat">Failed</span> <b id="failed">0</b></div>
+  </div>
+</main>
+
+<script>
+  const WINDOW = 100, TILES = 90;
+  const recent = [];
+  let total = 0, failed = 0, inflight = false;
+
+  // Same hash as app/app.py, so a version has the same colour on both pages.
+  function colorFor(v) {
+    if (v === "none") return "#64748b";
+    let h = 0;
+    for (const ch of v) h = (h * 31 + ch.charCodeAt(0)) % 360;
+    return `hsl(${h}, 65%, 45%)`;
+  }
+
+  const grid = document.getElementById("grid");
+  for (let i = 0; i < TILES; i++) grid.appendChild(document.createElement("div"));
+
+  function render() {
+    const counts = {};
+    recent.forEach(r => { counts[r.v] = (counts[r.v] || 0) + 1; });
+    const names = Object.keys(counts).sort();
+    const n = recent.length || 1;
+
+    document.getElementById("bar").innerHTML = names
+      .map(v => `<div style="width:${100 * counts[v] / n}%;background:${colorFor(v)}"></div>`).join("");
+    document.getElementById("legend").innerHTML = names
+      .map(v => `<span style="--c:${colorFor(v)}">${v} ${Math.round(100 * counts[v] / n)}%</span>`).join("");
+
+    const top = names.sort((a, b) => counts[b] - counts[a])[0];
+    document.getElementById("top").textContent = top || "...";
+    document.getElementById("total").textContent = total;
+    document.getElementById("failed").textContent = failed;
+
+    const tail = recent.slice(-TILES);
+    [...grid.children].forEach((tile, i) => {
+      const r = tail[i - (TILES - tail.length)];
+      tile.style.background = r ? (r.ok ? colorFor(r.v) : "var(--err)") : "#334155";
+    });
+  }
+
+  async function tick() {
+    if (inflight) return;
+    inflight = true;
+    let v = "none", ok = false;
+    try {
+      const res = await fetch("/api/version?t=" + Date.now(), { cache: "no-store" });
+      v = res.headers.get("X-App-Version") || "none";
+      ok = res.ok;
+    } catch (e) { /* network error: counted as failed */ }
+    inflight = false;
+    total++; if (!ok) failed++;
+    recent.push({ v, ok });
+    if (recent.length > WINDOW) recent.shift();
+    render();
+  }
+
+  setInterval(tick, 100);
+</script>
+</body>
+</html>

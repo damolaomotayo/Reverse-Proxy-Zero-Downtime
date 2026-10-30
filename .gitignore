@@ -1,0 +1,14 @@
+# Generated state
+.env
+.state
+.probe-stop
+nginx/upstream/upstream.conf
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Misc
+*.pem
+.DS_Store
